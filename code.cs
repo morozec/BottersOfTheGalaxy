@@ -442,7 +442,7 @@ class Player
         if (hero.Mana < 40) return null;
         //if (Targets.ContainsKey(hero.Id)) return null;
         
-        if (enemyUnits.Any(u => GetSqrDistance(MyTower, u) <= GetSqrDistance(MyTower, hero))) return null;
+        if (enemyUnits.Any(u => !(u is Groot) && GetSqrDistance(MyTower, u) <= GetSqrDistance(MyTower, hero))) return null;
       
         var isMyTowerClose = GetDistance(hero, MyTower) < 100;  //TODO
                
@@ -529,13 +529,23 @@ class Player
         
         var nearestGroot = groots.OrderBy(g => GetSqrDistance(g, hero)).FirstOrDefault();
         if (nearestGroot != null && GetDistance(nearestGroot, hero) <= 900) return "FIREBALL " + nearestGroot.X + " " + nearestGroot.Y + "; aggro GROOT"; 
+        
+        if (enemyHeroes.Count == 2 && GetDistance(enemyHeroes[0], enemyHeroes[1]) <= 50)
+        {
+            var fireballPoint = new Point((enemyHeroes[0].X + enemyHeroes[1].X)/2, (enemyHeroes[0].Y + enemyHeroes[1].Y)/2);
+            if (GetDistance(hero, fireballPoint) < 900)
+            {
+                return "FIREBALL " + fireballPoint.X + " " + fireballPoint.Y +";fireball 2";
+            }
+        }
                 
         var nearestEnemy = enemyHeroes.OrderBy(x => GetDistance(x, hero)).FirstOrDefault();
+        
         if (nearestEnemy == null) return null; //невидимый
         var dist = GetDistance(hero, nearestEnemy);
         if (dist > 500) return null;
         
-        return "FIREBALL " + nearestEnemy.X + " " + nearestEnemy.Y;
+        return "FIREBALL " + nearestEnemy.X + " " + nearestEnemy.Y + ";fireball 1";
     }
     
     static string GetBurningCommand(Hero hero, IList<Unit> enemyHeroes)
@@ -903,22 +913,8 @@ class Player
             var canAttackEnemyHeroes = enemyUnits.Where(u => u is Hero && GetMinAttackTime(unit, u) < 1).ToList();
             if (!canAttackEnemyHeroes.Any()) return null;
             
-            return canAttackEnemyHeroes.OrderBy(h => h.Health).First();
+            return canAttackEnemyHeroes.OrderBy(h => h.Health).First();           
             
-            /*
-            var enemyHeroes = enemyUnits.Where(u => u is Hero).ToList();
-            var nearestEnemyHeroe = enemyHeroes.OrderBy(h => 
-                Math.Min(GetOneShootAttackTime(unit, h, new Point(unit.X, unit.Y)), GetOneShootAttackTime(unit as Hero, h, GetMovingPoint(unit as Hero, h, unit as Hero)))).FirstOrDefault();
-            if (nearestEnemyHeroe != null && 
-                Math.Min(GetOneShootAttackTime(unit, nearestEnemyHeroe, new Point(unit.X, unit.Y)),GetOneShootAttackTime(unit as Hero, nearestEnemyHeroe, GetMovingPoint(unit as Hero, nearestEnemyHeroe, unit as Hero))) < 1)
-                return nearestEnemyHeroe;
-            
-            var weakestEnemy = enemyUnits.Where(
-                u => !(u is Hero) &&  
-                Math.Min(GetOneShootAttackTime(unit, u, new Point(unit.X, unit.Y)),GetOneShootAttackTime(unit as Hero, u, GetMovingPoint(unit as Hero, u, unit as Hero))) < 1).OrderBy(u => u.Health).FirstOrDefault();
-                
-            return weakestEnemy;
-            */          
            
         }
         else if (unit is Groot) 
@@ -940,7 +936,9 @@ class Player
         var isCloseToEnemyTower = GetDistance(EnemyTower, myHero) <= EnemyTower.AttackRange;
         var targetUnitData = GetTargetUnitData(myHero, otherHero, myUnits, enemyUnits, heroNumber);  
         
-        if (targetUnitData.OneShootKillPoint == null)
+        var behindCreaturesPoint = GetBehindCreaturesPoint(myHero, myUnits);        
+        
+        if (targetUnitData.OneShootKillPoint == null && GetSqrDistance(MyTower, myHero) < GetSqrDistance(MyTower, behindCreaturesPoint))
         {
             //Console.Error.WriteLine(myHero.HeroType);
             //Console.Error.WriteLine(myHero.Id);
@@ -977,8 +975,7 @@ class Player
    
     static double GetOneShootAttackTime(Unit sourceUnit, Point targetUnit, Point attackPoint)
     {
-        //var distToTargetUnit = GetDistance(hero, targetUnit);   
-        //var movingPoint = distToTargetUnit <= hero.AttackRange ? new Point(hero.X, hero.Y) : GetMovingPoint(hero, targetUnit); 
+        
         if (GetDistance(attackPoint, targetUnit) > sourceUnit.AttackRange) return 9999;
         
         var distToMovingPoint = GetDistance(sourceUnit, attackPoint);
@@ -1000,11 +997,11 @@ class Player
         {
             Point killPoint = null;
             var targetUnit = enemyUnits.Single(u => u.Id == TwoShootsUnitId);
-            var attackTime = GetOneShootAttackTime(myHero, targetUnit, GetMovingPoint(myHero, targetUnit, myHero));
+            var attackTime = GetOneShootAttackTime(myHero, targetUnit, GetMovingPoint(myHero, targetUnit, MyTower));
             if (attackTime < 1 && !enemyHeroes.Any(h => h.Damage >= targetUnit.Health && 
                 Math.Min(GetOneShootAttackTime(h as Hero, targetUnit, new Point(h.X, h.Y)), GetOneShootAttackTime(h as Hero, targetUnit, GetMovingPoint(h as Hero, targetUnit, h))) < attackTime))
             {
-                killPoint =  GetMovingPoint(myHero, targetUnit, myHero);
+                killPoint =  GetMovingPoint(myHero, targetUnit, MyTower);
             }
             else
             {
@@ -1208,7 +1205,9 @@ class Player
             var twoHeroesKillUnits = new List<Unit>();
             foreach (var unit in enemyUnits)
             {
-                var moveAttackTime = Math.Max(GetOneShootAttackTime(myHero, unit, GetMovingPoint(myHero, unit, MyTower)), GetMinAttackTime(otherHero, unit));       
+                var moveAttackTime = Math.Max(GetOneShootAttackTime(myHero, unit, GetMovingPoint(myHero, unit, MyTower)), 
+                    Math.Min(GetOneShootAttackTime(otherHero, unit, GetMovingPoint(otherHero, unit, MyTower)),GetOneShootAttackTime(otherHero,unit,new Point(otherHero.X, otherHero.Y))));
+               
                 if (moveAttackTime > 1) continue;     
             
                 if (unit.Id == OneShootUnitId) continue; 
@@ -1254,7 +1253,9 @@ class Player
             //{ 
                 foreach (var unit in enemyUnits)
                 {
-                    var moveAttackTime = Math.Max(GetOneShootAttackTime(myHero, unit, new Point(myHero.X, myHero.Y)), GetMinAttackTime(otherHero, unit)); 
+                    var moveAttackTime = Math.Max(GetOneShootAttackTime(myHero, unit, new Point(myHero.X, myHero.Y)), 
+                        Math.Min(GetOneShootAttackTime(otherHero, unit, GetMovingPoint(otherHero, unit, MyTower)),GetOneShootAttackTime(otherHero,unit,new Point(otherHero.X, otherHero.Y))));
+                
                     if (moveAttackTime > 1) continue;     
                 
                     if (unit.Id == OneShootUnitId) continue; 
@@ -1352,7 +1353,7 @@ class Player
                 {
                     SetAggro(myHero, creature);   
                 }
-                //return "ATTACK " + targetUnit.Id + "; kill hero " + targetUnit.Id; //криво работает
+                return "ATTACK " + targetUnit.Id + "; kill hero " + targetUnit.Id; //криво работает
             }
             var desc = TwoShootsUnitId == -1 ? "; 1 shoot " : "; 2 shoots ";
             desc += targetUnit.Team == myHero.Team ? "my " : "en ";
@@ -1424,6 +1425,7 @@ class Player
         }
         else
         {     
+            //убегаем от блмжнего боя 
             var nearestMeleeEnemyHero = enemyUnits.Where(u => u is Hero && !u.IsRanged).OrderBy(h => GetDistance(myHero, h)).FirstOrDefault();
             if (nearestMeleeEnemyHero != null)
             {
@@ -1444,6 +1446,33 @@ class Player
                     return "MOVE_ATTACK " + safePoint.X + " " + safePoint.Y + " " + moveAttackUnit.Id + "; run from melee hero";
                 }
             }
+            
+            //убегаем от pull'a
+            /*
+            var nearestDrStrangeHero = enemyUnits.SingleOrDefault(u => u is Hero && (u as Hero).HeroType == "DOCTOR_STRANGE");
+            if (myHero.Health < myHero.MaxHealth / 2d && nearestDrStrangeHero != null && (nearestDrStrangeHero as Hero).CountDown3 <= 1)
+            {
+                var drStrangeDist = GetDistance(myHero, nearestDrStrangeHero);
+                if (drStrangeDist < 400 + myHero.MovementSpeed + nearestDrStrangeHero.MovementSpeed)
+                {
+                   
+                   var vector = new Vector
+                    {
+                        StartPoint = new Point(nearestDrStrangeHero.X, nearestDrStrangeHero.Y),
+                        EndPoint = new Point(MyTower.X, MyTower.Y)              
+                    };
+                    
+                    var distToMovingPoint = GetDistance(vector.StartPoint, vector.EndPoint);
+                    var pathLength = Math.Min( 400 + myHero.MovementSpeed + nearestDrStrangeHero.MovementSpeed, GetDistance(myHero, MyTower));
+                    var coeff = pathLength * 1d / distToMovingPoint;                   
+                    vector.Mult(coeff);  
+                    
+                                        
+                    var nearestTarget = enemyUnits.OrderBy(u => GetSqrDistance(u, myHero)).FirstOrDefault();
+                    return "MOVE_ATTACK " + vector.EndPoint.X + " " + vector.EndPoint.Y + " " + nearestTarget.Id + ";run from pull";
+                }
+            }
+            */
                         
             
             var hasFarCreatures = myUnits.Any(u => u is Creature && GetDistance(MyTower, u) > GetDistance(MyTower, targetUnit));
